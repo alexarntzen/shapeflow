@@ -4,4 +4,6 @@ torch>=1.10.2
 deepthermal @ git+https://github.com/alexarntzen/deepthermal.git@new_usage#egg=deepthermal
 seaborn>=0.11.2
 scikit-learn>=1.0.2
-torhcflow
+flowtorch>=0.6
+nflows>=0.14
+# residual-flows @ git+https://github.com/VincentStimper/residual-flows.git

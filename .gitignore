@@ -47,3 +47,6 @@ experiments/figures
 *-blx.aux
 *-blx.bib
 *.run.xml
+
+# where is this from?
+build/
