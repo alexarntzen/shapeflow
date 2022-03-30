@@ -4,9 +4,11 @@
 *__pycache__/
 *.pyc
 **/*.ipynb_checkpoints/
+*.npy
+*.pt
+
 
 *.egg-info/
-
 *.aux
 *.lof
 *.log

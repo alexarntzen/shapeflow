@@ -1,11 +1,9 @@
-"""
-Cost functions associated with the SRV form. || q - sqrt(ksi_dx)r circ ksi||_{L^2}
-"""
 import warnings
-from typing import Optional, Tuple, Sequence
+from typing import Optional, Tuple, Sequence, Union, List
 
 import torch
 import torch.nn as nn
+from torch.utils.data import TensorDataset
 import torch.distributions as dist
 import torch.distributions.constraints as constraints
 import flowtorch.bijectors as bij
@@ -46,7 +44,7 @@ class WrapModel(bij.Bijector):
     def _forward(
         self,
         x: torch.Tensor,
-        params: Optional[Sequence[torch.Tensor]],
+        params: Optional[Sequence[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         # assumes model.forward(x) = T(x), log | det DT(x) |
         return self._model_forward_func(x)
@@ -54,7 +52,7 @@ class WrapModel(bij.Bijector):
     def _inverse(
         self,
         y: torch.Tensor,
-        params: Optional[Sequence[torch.Tensor]],
+        params: Optional[Sequence[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         # assumes model.inverse(y) = T_inv(y), log | det DT_inv(y) |
         # log_abs_det is
@@ -68,7 +66,7 @@ class WrapModel(bij.Bijector):
         self,
         x: torch.Tensor,
         y: torch.Tensor,
-        params: Optional[Sequence[torch.Tensor]],
+        params: Optional[Sequence[torch.Tensor]] = None,
     ) -> torch.Tensor:
         warnings.warn("Computing _log_abs_det_jacobian from values and not from cache.")
         if x is not None:
@@ -113,6 +111,13 @@ class ModuleBijector(WrapModel):
         super().__init__(shape=shape, context_shape=context_shape, model=model)
 
 
-def torch_monte_carlo_dkl_loss(model: dist.Distribution, x_train, y_train=None):
+def torch_monte_carlo_dkl_loss(
+    model: dist.Distribution,
+    data: Union[List, TensorDataset],
+    loss_func: callable = None,
+) -> torch.Tensor:
+    # model == flow
+    # load samples from unknown
+    x_train = data[:]
     d_kl_est = -model.log_prob(x_train).mean()
     return d_kl_est
