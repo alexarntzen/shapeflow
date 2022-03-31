@@ -111,13 +111,13 @@ class ModuleBijector(WrapModel):
         super().__init__(shape=shape, context_shape=context_shape, model=model)
 
 
-def torch_monte_carlo_dkl_loss(
+def monte_carlo_dkl_loss(
     model: dist.Distribution,
     data: Union[List, TensorDataset],
     loss_func: callable = None,
 ) -> torch.Tensor:
     # model == flow
     # load samples from unknown
-    x_train = data[:]
-    d_kl_est = -model.log_prob(x_train).mean()
+    (x_train,) = data[:]
+    d_kl_est = -model.log_prob(value=x_train).mean()
     return d_kl_est
