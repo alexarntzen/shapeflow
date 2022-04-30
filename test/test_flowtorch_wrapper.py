@@ -3,8 +3,8 @@ import unittest
 import torch
 import torch.distributions.constraints as constraints
 import flowtorch.distributions as ftdist
-import shapeflow
-import nflows.transforms as transforms
+import shapeflow as sf
+import nflows.flows
 
 
 class TestFlowTorchWrapper(unittest.TestCase):
@@ -12,21 +12,20 @@ class TestFlowTorchWrapper(unittest.TestCase):
         # Set up model
         num_layers = 5
         dims = 2
-
-        transforms_list = []
-        for _ in range(num_layers):
-            transforms_list.append(transforms.ReversePermutation(features=dims))
-            transforms_list.append(
-                transforms.MaskedAffineAutoregressiveTransform(
-                    features=dims, hidden_features=4
-                )
-            )
+        hidden_features = 4
 
         base_dist = torch.distributions.MultivariateNormal(
             torch.zeros(dims), torch.eye(dims)
         )
-        transform = transforms.CompositeTransform(transforms_list)
-        bijector = shapeflow.WrapInverseModel(model=transform)
+
+        # transform = transforms.CompositeTransform(transforms_list)
+        bijector = sf.WrapInverseModel(
+            get_transform=sf.utils.get_transform_nflow,
+            Transform=nflows.flows.MaskedAutoregressiveFlow,
+            num_layers=num_layers,
+            hidden_features=hidden_features,
+            num_blocks_per_layer=2,
+        )
 
         flow = ftdist.Flow(bijector=bijector, base_dist=base_dist)
         samples = flow.sample([10])
