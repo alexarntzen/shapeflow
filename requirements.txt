@@ -8,3 +8,5 @@ flowtorch>=0.6
 nflows>=0.14
 residual-flows @ git+https://github.com/VincentStimper/residual-flows.git
 normflow @ git+https://github.com/VincentStimper/normalizing-flows.git
+signatureshape @ git+https://github.com/alexarntzen/paalel-master.git
+

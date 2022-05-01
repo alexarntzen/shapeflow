@@ -1,5 +1,6 @@
 from shapeflow.normalizing_flows import (
     ModuleBijector,
+    WrapModel,
     WrapInverseModel,
     monte_carlo_dkl_loss,
 )  # noqa: F401

@@ -1,9 +1,15 @@
 from typing import List, Type
+from tqdm import tqdm
 import numpy as np
 import torch
-from tqdm import tqdm
+import torch.distributions as dist
 import nflows.transforms
 import nflows.flows
+import flowtorch as ft
+import flowtorch.distributions
+from shapeflow import WrapInverseModel, WrapModel
+
+# from shapeflow.utilsimport WrapInverseModel, WrapModel
 
 
 def get_transform_nflow(
@@ -20,8 +26,18 @@ def get_transform_nflow(
         RuntimeError("Failed to create Transform")
 
 
-def get_transform_nflow_flow(**kwargs):
-    return get_transform_nflow(**kwargs)._transform
+def get_flow(
+    get_transform: callable,
+    base_dist: dist.Distribution,
+    inverse_model: bool = True,
+    **transform_kwargs
+) -> ft.distributions.Flow:
+    wrapp = WrapInverseModel if inverse_model else WrapModel
+
+    # create a bijector that wraps the original model. See test for example
+    bijector = wrapp(get_transform=get_transform, **transform_kwargs)
+    model = ft.distributions.Flow(base_dist=base_dist, bijector=bijector)
+    return model
 
 
 def animation_to_eulers(animations: List, reduce_shape=True, **kwargs) -> np.array:
