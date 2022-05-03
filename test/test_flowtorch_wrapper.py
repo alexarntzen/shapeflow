@@ -20,14 +20,59 @@ class TestFlowTorchWrapper(unittest.TestCase):
 
         # transform = transforms.CompositeTransform(transforms_list)
         bijector = sf.WrapInverseModel(
-            get_transform=sf.utils.get_transform_nflow,
-            Transform=nflows.flows.MaskedAutoregressiveFlow,
-            num_layers=num_layers,
-            hidden_features=hidden_features,
-            num_blocks_per_layer=2,
+            params_fn=sf.normalizing_flows.LazyModule(
+                get_transform=sf.utils.get_transform_nflow,
+                Transform=nflows.flows.MaskedAutoregressiveFlow,
+                num_layers=num_layers,
+                hidden_features=hidden_features,
+                num_blocks_per_layer=2,
+            )
         )
 
         flow = ftdist.Flow(bijector=bijector, base_dist=base_dist)
+        samples = flow.sample([10])
+        print(samples.shape)
+
+    def test_normflow(self):
+        # Set up model
+        num_layers = 2
+        dims = 2
+        hidden_features = [4] * num_layers
+        hidden_layers = [5] * num_layers
+
+        base_dist = torch.distributions.MultivariateNormal(
+            torch.zeros(dims), torch.eye(dims)
+        )
+
+        # transform = transforms.CompositeTransform(transforms_list)
+        composted_bij = sf.utils.get_bijector(
+            get_transform=sf.normalizing_flows.get_residual_transform,
+            compose=True,
+            hidden_features=hidden_features,
+            hidden_layers=hidden_layers,
+        )
+        flow = ftdist.Flow(bijector=composted_bij, base_dist=base_dist)
+        samples = flow.sample([10])
+        print(samples.shape)
+
+    def test_normflow_2(self):
+        # Set up model
+        num_layers = 2
+        dims = 2
+        hidden_features = [4] * num_layers
+        hidden_layers = [5] * num_layers
+
+        base_dist = torch.distributions.MultivariateNormal(
+            torch.zeros(dims), torch.eye(dims)
+        )
+
+        flow = sf.utils.get_flow(
+            get_transform=sf.normalizing_flows.get_residual_transform,
+            base_dist=base_dist,
+            compose=True,
+            hidden_features=hidden_features,
+            hidden_layers=hidden_layers,
+        )
         samples = flow.sample([10])
         print(samples.shape)
 

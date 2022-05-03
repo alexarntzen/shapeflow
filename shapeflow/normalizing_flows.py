@@ -9,6 +9,7 @@ import torch.distributions.constraints as constraints
 import flowtorch
 import flowtorch.bijectors as bij
 from flowtorch.parameters.base import Parameters
+import normflow as nf
 
 l2_loss = nn.MSELoss()
 
@@ -18,7 +19,7 @@ class WrapModel(bij.Bijector):
 
     nn.Module must have .forward and .inverse on the form described below
 
-    Many models are not written in be compatile with torch.distributions.
+    Many models are not written in be compatible with torch.distributions.
     Thus we implement a simple wrapper class to make it compatible with flowtorch.
     """
 
@@ -32,17 +33,18 @@ class WrapModel(bij.Bijector):
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
-        **model_kwargs,
+        # **model_kwargs,
     ) -> None:
 
         if params_fn is None:
+            # find a good default here
             params_fn = LazyModule()
         super().__init__(params_fn=params_fn, shape=shape, context_shape=context_shape)
         # update domain shapes to account for matrix (2) and scalar (0)  input
         self.domain = constraints.independent(constraints.real, len(shape))
         self.codomain = constraints.independent(constraints.real, len(shape))
 
-        self._params_fn = self._params_fn(**model_kwargs)
+        # self._params_fn = self._params_fn(**model_kwargs)
         self.model = self._params_fn.transform
 
         self.parameters = self.model.parameters
@@ -96,7 +98,7 @@ class WrapModel(bij.Bijector):
 class WrapInverseModel(WrapModel):
     """This class wraps the genius case when T = model.inverse and T_inv = model.forward
 
-    This is usually the case since during training.
+    This is usually the case during training.
     Since the inverse operation is used the most.
     """
 
@@ -106,13 +108,13 @@ class WrapInverseModel(WrapModel):
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
-        **model_kwargs,
+        # **model_kwargs,
     ) -> None:
         super().__init__(
             params_fn=params_fn,
             shape=shape,
             context_shape=context_shape,
-            **model_kwargs["model_kwargs"],
+            # **model_kwargs["model_kwargs"],
         )
 
         self._model_inverse_func = self.model.forward
@@ -126,13 +128,13 @@ class ModuleBijector(WrapModel):
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
-        **model_kwargs,
+        # **model_kwargs,
     ):
         super().__init__(
             shape=shape,
             context_shape=context_shape,
             params_fn=params_fn,
-            **model_kwargs["model_kwargs"],
+            # **model_kwargs["model_kwargs"],
         )
 
 
@@ -170,3 +172,43 @@ def monte_carlo_dkl_loss(
     (x_train,) = data[:]
     d_kl_est = -model.log_prob(x_train).mean()
     return d_kl_est
+
+
+def get_residual_transform(
+    shape: torch.Size,
+    hidden_features: int,
+    hidden_layers: int = None,
+    kernel_size: int = None,
+    CNN: bool = False,
+    n_exact_terms=2,
+    n_samples=1,
+    reduce_memory=True,
+    reverse=True,
+):
+    latent_size = shape[0]
+    if CNN:
+
+        if kernel_size is None:
+            kernel_size = hidden_features
+        assert kernel_size % 2 == 1, f"kernel size must be odd but is {kernel_size}"
+        net = nf.nets.LipschitzCNN(
+            channels=[1] * (hidden_layers + 1),
+            kernel_size=[kernel_size] * (hidden_layers),
+            init_zeros=True,
+            lipschitz_const=0.9,
+        )
+
+    else:
+        net = nf.nets.LipschitzMLP(
+            [latent_size] + [hidden_features] * (hidden_layers - 1) + [latent_size],
+            init_zeros=True,
+            lipschitz_const=0.9,
+        )
+    transform = nf.flows.Residual(
+        net,
+        n_exact_terms=n_exact_terms,
+        n_samples=n_samples,
+        reduce_memory=reduce_memory,
+        reverse=reverse,
+    )
+    return transform
