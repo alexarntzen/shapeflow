@@ -184,6 +184,7 @@ def get_residual_transform(
     n_samples=1,
     reduce_memory=True,
     reverse=True,
+    conditional=False,
 ):
     latent_size = shape[0]
     if CNN:

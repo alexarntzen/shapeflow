@@ -6,4 +6,6 @@ from shapeflow.normalizing_flows import (
     LazyModule,
 )  # noqa: F401
 import shapeflow.utils
+import shapeflow.reparam
 from shapeflow.lipschitz import get_post_step_lipchitz
+
