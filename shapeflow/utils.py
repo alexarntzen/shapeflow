@@ -1,4 +1,4 @@
-from typing import List, Type
+from typing import List, Type, Union
 
 import deepthermal.validation
 from tqdm import tqdm
@@ -16,105 +16,21 @@ import shapeflow as sf
 # from shapeflow.utilsimport WrapInverseModel, WrapModel
 
 
-def data_to_motion_array(data: torch.Tensor, transposed: bool = True) -> np.ndarray:
-    """Converts to degrees and pads zero position"""
-    pads = (0, 0, 3, 0)
-    _data = data
-    if len(_data.shape) == 4:
-        _data = _data[0][0]
-    if len(_data.shape) == 3:
-        _data = _data[0]
-    assert len(_data.shape) == 2, "wrong shape for motion capture array "
-    if transposed:
-        _data = _data.T
-    return (
-        torch.nn.functional.pad(torch.rad2deg(_data), pads, "constant", 0)
-        .detach()
-        .numpy()
-    )
-
-
-def motion_array_to_data(
-    motion_array: np.ndarray, transposed: bool = True
-) -> torch.Tensor:
-    """Converts to degrees and pads zero position"""
-    if transposed:
-        motion_array = motion_array.T
-    return torch.tensor(np.deg2rad(motion_array[:, 3:])).float()
-
-
-def get_transform_nflow(
-    Transform: Type, shape: torch.Size, **kwargs
-) -> nflows.transforms.Transform:
-    assert len(shape) == 1
-    transform = Transform(features=shape[0], **kwargs)
-    if isinstance(transform, nflows.flows.Flow):
-        transform = transform._transform
-
-    if isinstance(transform, nflows.transforms.Transform):
-        return transform
-    else:
-        RuntimeError("Failed to create Transform")
-
-
-def get_bijector(
-    get_transform: callable = None,
-    inverse_model: bool = True,
-    compose: bool = False,
-    **transform_kwargs,
-) -> ft.bijectors.Bijector:
-    """
-    if composted **transform_kwargs must only contain lists
-    """
-    wrapp = sf.WrapInverseModel if inverse_model else sf.WrapModel
-    if compose:
-        transform_kwargs_iter = deepthermal.validation.create_subdictionary_iterator(
-            transform_kwargs, product=False
-        )
-        bijectors = []
-        for transform_kwargs_i in transform_kwargs_iter:
-            bijectors.append(
-                wrapp(
-                    params_fn=sf.LazyModule(
-                        get_transform=get_transform, **transform_kwargs_i
-                    )
-                )
-            )
-        bijector = ft.bijectors.Compose(bijectors=bijectors)
-    else:
-        bijector = wrapp(
-            params_fn=sf.LazyModule(get_transform=get_transform, **transform_kwargs)
-        )
-    return bijector
-
-
-def get_flow(
-    get_transform: callable,
-    base_dist: dist.Distribution,
-    inverse_model: bool = True,
-    **transform_kwargs,
-) -> ft.distributions.Flow:
-    bijector = get_bijector(
-        get_transform=get_transform, inverse_model=inverse_model, **transform_kwargs
-    )
-    model = ft.distributions.Flow(base_dist=base_dist, bijector=bijector)
-    return model
-
-
-def get_composed_flow(
-    get_transform: callable,
-    base_dist: dist.Distribution,
-    num_layers: int,
-    inverse_model: bool = True,
-    **transform_kwargs,
-) -> ft.distributions.Flow:
-    wrapp = sf.WrapInverseModel if inverse_model else sf.WrapModel
-    # create a bijector that wraps the original model. See test for example
-    bijector = wrapp(
-        params_fn=sf.LazyModule(get_transform=get_transform, **transform_kwargs)
-    )
-    model = ft.distributions.Flow(base_dist=base_dist, bijector=bijector)
-    return model
+# def get_composed_flow(
+#     get_transform: callable,
+#     base_dist: dist.Distribution,
+#     num_layers: int,
+#     inverse_model: bool = True,
+#     **transform_kwargs,
+# ) -> ft.distributions.Flow:
+#     wrapp = sf.WrapInverseModel if inverse_model else sf.WrapModel
+#     # create a bijector that wraps the original model. See test for example
+#     bijector = wrapp(
+#         params_fn=sf.LazyModule(get_transform=get_transform, **transform_kwargs)
+#     )
+#     model = ft.distributions.Flow(base_dist=base_dist, bijector=bijector)
+#     return model
+#
 
 
 def animation_to_eulers(animations: List, reduce_shape=True, **kwargs) -> np.array:
@@ -163,3 +79,30 @@ def frame_to_euler(frame, deg2rad=True, remove_root=False) -> np.array:
         root_and_angles = root_and_angles[3:]
 
     return root_and_angles
+
+
+def data_to_motion_array(data: torch.Tensor, transposed: bool = True) -> np.ndarray:
+    """Converts to degrees and pads zero position"""
+    pads = (0, 0, 3, 0)
+    _data = data
+    if len(_data.shape) == 4:
+        _data = _data[0][0]
+    if len(_data.shape) == 3:
+        _data = _data[0]
+    assert len(_data.shape) == 2, "wrong shape for motion capture array "
+    if transposed:
+        _data = _data.T
+    return (
+        torch.nn.functional.pad(torch.rad2deg(_data), pads, "constant", 0)
+        .detach()
+        .numpy()
+    )
+
+
+def motion_array_to_data(
+    motion_array: np.ndarray, transposed: bool = True
+) -> torch.Tensor:
+    """Converts to degrees and pads zero position"""
+    if transposed:
+        motion_array = motion_array.T
+    return torch.tensor(np.deg2rad(motion_array[:, 3:])).float()

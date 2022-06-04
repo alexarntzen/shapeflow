@@ -1,17 +1,53 @@
 import warnings
-from typing import Optional, Tuple, Sequence, Union, List
-
+from typing import Optional, Tuple, Sequence, Union, List, Type
+from collections.abc import Callable
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset
 import torch.distributions as dist
 import torch.distributions.constraints as constraints
-import flowtorch
+import torch.distributions.transformed_distribution
+import flowtorch as ft
 import flowtorch.bijectors as bij
+import flowtorch.distributions as ftdist
 from flowtorch.parameters.base import Parameters
-import normflow as nf
+import deepthermal.validation
+
 
 l2_loss = nn.MSELoss()
+
+def monte_carlo_dkl_loss(
+        model: dist.Distribution,
+        data: Union[List, TensorDataset],
+        loss_func: callable = None,
+) -> torch.Tensor:
+    # model == flow
+    # load samples from unknown
+    (x_train,) = data[:]
+    d_kl_est = -model.log_prob(x_train).mean()
+    return d_kl_est
+
+
+def get_flow(
+        get_transform: Callable[..., dist.Transform],
+        base_dist: dist.Distribution,
+        inverse_model: bool = True,
+        flowtorch:bool=True,
+        **transform_kwargs,
+) -> Union[dist.TransformedDistribution, ftdist.Flow]:
+    """get the flow if you have a get get_transform"""
+    if flowtorch:
+        bijector = get_bijector(
+            get_transform=get_transform, inverse_model=inverse_model, **transform_kwargs
+        )
+        model = ftdist.Flow(base_dist=base_dist, bijector=bijector)
+        return model
+    else:
+        transform=get_transform(**transform_kwargs)
+        if inverse_model:
+            transform = transform.inv
+        model = dist.TransformedDistribution(base_distribution=base_dist, transforms=transform)
+        return model
 
 
 class WrapModel(bij.Bijector):
@@ -29,7 +65,7 @@ class WrapModel(bij.Bijector):
 
     def __init__(
         self,
-        params_fn: Optional[flowtorch.Lazy] = None,
+        params_fn: Optional[ft.Lazy] = None,
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
@@ -104,7 +140,7 @@ class WrapInverseModel(WrapModel):
 
     def __init__(
         self,
-        params_fn: Optional[flowtorch.Lazy] = None,
+        params_fn: Optional[ft.Lazy] = None,
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
@@ -121,22 +157,6 @@ class WrapInverseModel(WrapModel):
         self._model_forward_func = self.model.inverse
 
 
-class ModuleBijector(WrapModel):
-    def __int__(
-        self,
-        params_fn: Optional[flowtorch.Lazy] = None,
-        *,
-        shape: torch.Size,
-        context_shape: Optional[torch.Size] = None,
-        # **model_kwargs,
-    ):
-        super().__init__(
-            shape=shape,
-            context_shape=context_shape,
-            params_fn=params_fn,
-            # **model_kwargs["model_kwargs"],
-        )
-
 
 class LazyModule(Parameters):
     def __init__(
@@ -144,7 +164,7 @@ class LazyModule(Parameters):
         param_shapes: Sequence[torch.Size],
         input_shape: torch.Size,
         context_shape: Optional[torch.Size],
-        get_transform: callable = None,
+        get_transform: Callable[..., nn.Module] = None,
         **model_kwargs,
     ) -> None:
         model_kwargs = model_kwargs["model_kwargs"]
@@ -162,54 +182,34 @@ class LazyModule(Parameters):
         return None
 
 
-def monte_carlo_dkl_loss(
-    model: dist.Distribution,
-    data: Union[List, TensorDataset],
-    loss_func: callable = None,
-) -> torch.Tensor:
-    # model == flow
-    # load samples from unknown
-    (x_train,) = data[:]
-    d_kl_est = -model.log_prob(x_train).mean()
-    return d_kl_est
+def get_bijector(
+    get_transform: callable = None,
+    inverse_model: bool = True,
+    compose: bool = False,
+    **transform_kwargs,
+) -> Union[ft.bijectors.Bijector, ft.Lazy]:
+    """
+    returns wrapped module which has a forward method which returns T(x), logDT(x)
 
-
-def get_residual_transform(
-    shape: torch.Size,
-    hidden_features: int,
-    hidden_layers: int = None,
-    kernel_size: int = None,
-    CNN: bool = False,
-    n_exact_terms=2,
-    n_samples=1,
-    reduce_memory=True,
-    reverse=True,
-    conditional=False,
-):
-    latent_size = shape[0]
-    if CNN:
-
-        if kernel_size is None:
-            kernel_size = hidden_features
-        assert kernel_size % 2 == 1, f"kernel size must be odd but is {kernel_size}"
-        net = nf.nets.LipschitzCNN(
-            channels=[1] * (hidden_layers + 1),
-            kernel_size=[kernel_size] * (hidden_layers),
-            init_zeros=True,
-            lipschitz_const=0.9,
+    if composted **transform_kwargs must only contain lists
+    """
+    wrapp = WrapInverseModel if inverse_model else WrapModel
+    if compose:
+        transform_kwargs_iter = deepthermal.validation.create_subdictionary_iterator(
+            transform_kwargs, product=False
         )
-
+        bijectors = []
+        for transform_kwargs_i in transform_kwargs_iter:
+            bijectors.append(
+                wrapp(
+                    params_fn=LazyModule(
+                        get_transform=get_transform, **transform_kwargs_i
+                    )
+                )
+            )
+        bijector = ft.bijectors.Compose(bijectors=bijectors)
     else:
-        net = nf.nets.LipschitzMLP(
-            [latent_size] + [hidden_features] * (hidden_layers - 1) + [latent_size],
-            init_zeros=True,
-            lipschitz_const=0.9,
+        bijector = wrapp(
+            params_fn=LazyModule(get_transform=get_transform, **transform_kwargs)
         )
-    transform = nf.flows.Residual(
-        net,
-        n_exact_terms=n_exact_terms,
-        n_samples=n_samples,
-        reduce_memory=reduce_memory,
-        reverse=reverse,
-    )
-    return transform
+    return bijector
