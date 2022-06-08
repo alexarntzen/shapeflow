@@ -34,7 +34,7 @@ import shapeflow as sf
 
 
 def animation_to_eulers(animations: List, reduce_shape=True, **kwargs) -> np.array:
-    # asssumes that all the skeletions in animations have the same keys
+    # assumes that all the skeletions in animations have the same keys
 
     # init array
     if reduce_shape:

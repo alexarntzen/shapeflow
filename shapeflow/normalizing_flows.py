@@ -1,6 +1,8 @@
 import warnings
-from typing import Optional, Tuple, Sequence, Union, List, Type
+from typing import Optional, Tuple, Sequence, Union, List, Iterator
 from collections.abc import Callable
+
+import flowtorch.bijectors
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset
@@ -13,13 +15,13 @@ import flowtorch.distributions as ftdist
 from flowtorch.parameters.base import Parameters
 import deepthermal.validation
 
-
 l2_loss = nn.MSELoss()
 
+
 def monte_carlo_dkl_loss(
-        model: dist.Distribution,
-        data: Union[List, TensorDataset],
-        loss_func: callable = None,
+    model: dist.Distribution,
+    data: Union[List, TensorDataset],
+    loss_func: callable = None,
 ) -> torch.Tensor:
     # model == flow
     # load samples from unknown
@@ -27,27 +29,96 @@ def monte_carlo_dkl_loss(
     d_kl_est = -model.log_prob(x_train).mean()
     return d_kl_est
 
+def get_monte_carlo_dkl_loss_conditioned(epsilon:float=0.1):
+    def monte_carlo_dkl_loss_conditioned(
+        model: nn.ModuleList,
+        data: Union[List, TensorDataset],
+        loss_func: callable = None,
+    ) -> torch.Tensor:
+        # model == flow
+        # load samples from unknown
+        x_train, p_old, priors = data[:]
+        c_max = p_old.shape[-1]  # model.bijector.module.context_size
+        # epsilon = 0.001
+        # # print(model.bijector._context_shape)
+        #
+        log_p = torch.zeros((len(p_old), c_max))
+        c_max = len(model)
+        for k in range(c_max):
+            log_p[:, k] = model[k].log_prob(x_train)
+
+        p = torch.exp(log_p)
+        p = torch.nan_to_num(p)
+
+        sum_p = torch.sum(p*priors, dim=1, keepdim=True)
+        p_new  = p*priors/sum_p
+        d_kl_est = - (p_new* log_p).mean()
+
+
+        return d_kl_est
+    return monte_carlo_dkl_loss_conditioned
+
+def get_post_epoch_update_p(epsilon:float=0.1):
+    @torch.no_grad()
+    def post_epoch_update_p(model:nn.Module, data:torch.utils.data.Dataset):
+        x_train, p_old = data[:]
+        c_max = p_old.shape[-1]  # model.bijector.module.context_size
+        log_p = torch.zeros((len(p_old), c_max))
+
+        for k in range(c_max):
+            log_p[:,k] = model[k].log_prob(x_train)
+
+        p = torch.exp(log_p)
+        p = torch.nan_to_num(p)
+        sum_p = torch.sum(p, dim=1, keepdim=True)
+        p_dir = p / sum_p
+        p_new = p_old + epsilon*(p_dir - p_old)
+
+        p_old[:] = p_new[:]
+
+    return post_epoch_update_p
 
 def get_flow(
-        get_transform: Callable[..., dist.Transform],
-        base_dist: dist.Distribution,
-        inverse_model: bool = True,
-        flowtorch:bool=True,
-        **transform_kwargs,
-) -> Union[dist.TransformedDistribution, ftdist.Flow]:
+    get_transform: Callable[..., nn.Module],
+    base_dist: dist.Distribution,
+    inverse_model: bool = True,
+    flowtorch: bool = True,
+    num_flows: int = 1,
+    **transform_kwargs,
+) -> Union[nn.ModuleList,dist.TransformedDistribution, ftdist.Flow]:
     """get the flow if you have a get get_transform"""
-    if flowtorch:
-        bijector = get_bijector(
-            get_transform=get_transform, inverse_model=inverse_model, **transform_kwargs
+    if num_flows > 1:
+        return nn.ModuleList(
+            [
+                get_flow(
+                    get_transform=get_transform,
+                    base_dist=base_dist,
+                    inverse_model=inverse_model,
+                    flowtorch=flowtorch,
+                    num_flows=1,
+                    **transform_kwargs,
+                )
+                for _ in range(num_flows)
+            ]
         )
-        model = ftdist.Flow(base_dist=base_dist, bijector=bijector)
-        return model
     else:
-        transform=get_transform(**transform_kwargs)
-        if inverse_model:
-            transform = transform.inv
-        model = dist.TransformedDistribution(base_distribution=base_dist, transforms=transform)
-        return model
+        if flowtorch:
+            bijector = get_bijector(
+                get_transform=get_transform,
+                inverse_model=inverse_model,
+                **transform_kwargs,
+            )
+            model = ftdist.Flow(base_dist=base_dist, bijector=bijector)
+            return model
+        else:
+            # alternative code structure
+            transform = get_transform(**transform_kwargs)
+            if inverse_model:
+                transform = transform.inv
+            model = dist.TransformedDistribution(
+                base_distribution=base_dist, transforms=transform
+            )
+            return model
 
 
 class WrapModel(bij.Bijector):
@@ -69,7 +140,6 @@ class WrapModel(bij.Bijector):
         *,
         shape: torch.Size,
         context_shape: Optional[torch.Size] = None,
-        # **model_kwargs,
     ) -> None:
 
         if params_fn is None:
@@ -80,12 +150,14 @@ class WrapModel(bij.Bijector):
         self.domain = constraints.independent(constraints.real, len(shape))
         self.codomain = constraints.independent(constraints.real, len(shape))
 
-        # self._params_fn = self._params_fn(**model_kwargs)
-        self.model = self._params_fn.transform
+        self.model: nn.Module = self._params_fn.transform
 
-        self.parameters = self.model.parameters
-        self._model_inverse_func = self.model.inverse
         self._model_forward_func = self.model.forward
+        self._model_inverse_func = self.model.inverse
+
+    def parameters(self, recurse: bool = True) -> Iterator[nn.Parameter]:
+        for param in self.model.parameters(recurse=recurse):
+            yield param
 
     def _forward(
         self,
@@ -93,7 +165,7 @@ class WrapModel(bij.Bijector):
         params: Optional[Sequence[torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         "Return T(x),  DT(x)"
-        # assumes model.forward(x) = T(x), log | det DT(x) |
+
         return self._model_forward_func(x)
 
     def _inverse(
@@ -117,17 +189,28 @@ class WrapModel(bij.Bijector):
         params: Optional[Sequence[torch.Tensor]] = None,
     ) -> torch.Tensor:
         warnings.warn("Computing _log_abs_det_jacobian from values and not from cache.")
-        if x is not None:
-            _y, log_det_jac = self._model_forward_func(x)
-            return log_det_jac
-        elif y is not None:
-            _x, log_det_jac_inv = self._model_inverse_func(y)
-            return -log_det_jac_inv
+        if params is not None:
+            context = params[0]
+            if x is not None:
+                _y, log_det_jac = self._model_forward_func(x, context=context)
+                return log_det_jac
+            elif y is not None:
+                _x, log_det_jac_inv = self._model_inverse_func(y, context=context)
+                return -log_det_jac_inv
+            else:
+                raise RuntimeError
         else:
-            raise RuntimeError
+            if x is not None:
+                _y, log_det_jac = self._model_forward_func(x)
+                return log_det_jac
+            elif y is not None:
+                _x, log_det_jac_inv = self._model_inverse_func(y)
+                return -log_det_jac_inv
+            else:
+                raise RuntimeError
 
     def param_shapes(self, shape: torch.Size) -> Sequence[torch.Size]:
-        # I do not know what this is used for
+        """Returns"""
         return (shape,)
 
 
@@ -157,7 +240,6 @@ class WrapInverseModel(WrapModel):
         self._model_forward_func = self.model.inverse
 
 
-
 class LazyModule(Parameters):
     def __init__(
         self,
@@ -178,8 +260,8 @@ class LazyModule(Parameters):
         x: Optional[torch.Tensor] = None,
         context: Optional[torch.Tensor] = None,
     ) -> Optional[Sequence[torch.Tensor]]:
-        """I do not know why this is used"""
-        return None
+        # so that params = context
+        return (context,)
 
 
 def get_bijector(
