@@ -8,6 +8,9 @@ def get_post_step_lipchitz(n_iterations: int = 5) -> callable:
     """
 
     def post_step_lipchitz(model: nn.Module, **kwargs):
+        if isinstance(model, nn.ModuleList):
+            for m in model:
+                post_step_lipchitz(m, **kwargs)
         for m in model.modules():
             if isinstance(m, InducedNormConv2d) or isinstance(m, InducedNormLinear):
                 m.compute_weight(update=True, n_iterations=n_iterations)

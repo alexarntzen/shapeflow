@@ -1,11 +1,9 @@
-from abc import ABC
 from typing import Type
-import warnings
+import contextlib
+import io
 import torch
 import torch.nn as nn
 import normflow as nf
-import torch.distributions as dist
-from torch.distributions import constraints
 from torchdyn.models import CNF, hutch_trace, autograd_trace
 from torchdyn.core import NeuralODE
 from torchdyn.nn import Augmenter
@@ -14,45 +12,30 @@ import nflows.transforms
 import nflows.flows
 from torch.distributions import MultivariateNormal
 
-#
-# class ConditionalModule(nn.Module):
-#     def __init__(self, context_size, get_net:Callable[..., nn.Module], **module_kwargs):
-#         super(ConditionalModule, self).__init__()
-#
-#         self.models_c = nn.ModuleList([get_net(**module_kwargs) for _ in range(context_size)])
-#         self.context_size = context_size
-#         self.context = None
-#
-#
-#     def condition(self, context:int ):
-#         self.context = context
-#         return self
-#
-#     def forward(self, x, context:int=None):
-#         if context is None and self.context is not None:
-#             context = self.context
-#         return self.models_c[context](x)
-
 
 class NDETransform(nn.Module):
+    """Note that backwards computation using adjoint for torchdyn and reverse time
+    so we need to make this an iverse model  z = T(x)"""
+
     def __init__(
         self,
         shape,
         get_net: Callable[..., nn.Module],
-        trace_estimator: str = "hutch_trance",
+        trace_estimator: str = "autograd",
         t_span=None,
+        sensitivity="adjoint",
+        verbose: bool = False,
         **model_kwargs,
     ):
         super().__init__()
         self._cached_log_abs_det_dy_dx = None
         input_features = shape[0]
 
-        # for multiple flows in one module
-        # if context_size>1:
-        #     self.net = ConditionalModule(context_size=context_size, get_net=get_net, input_dimension=input_features, output_dimension=input_features, **model_kwargs)
-        # else:
-
-        self.net = get_net(input_features, input_features, **model_kwargs)
+        self.net = get_net(
+            input_dimension=input_features,
+            output_dimension=input_features,
+            **model_kwargs,
+        )
         # self.context_size = context_size
 
         # trace with noise
@@ -66,14 +49,17 @@ class NDETransform(nn.Module):
         cnf = CNF(
             net=self.net, trace_estimator=self.trace_estimator, noise_dist=noise_dist
         )
-        self.nde = NeuralODE(
-            cnf,
-            solver="dopri5",
-            sensitivity="adjoint",
-            atol=1e-4,
-            rtol=1e-4,
-            return_t_eval=False,
-        )
+        with contextlib.redirect_stdout(io.StringIO()) as f:
+            self.nde = NeuralODE(
+                cnf,
+                solver="dopri5",
+                sensitivity=sensitivity,
+                atol=1e-4,
+                rtol=1e-4,
+                return_t_eval=False,
+            )
+        if verbose:
+            print(f.getvalue())
 
         self.t_span = torch.linspace(0, 1, 2) if t_span is None else t_span
         self.t_span_reverse = torch.flip(self.t_span, dims=[0])
@@ -92,6 +78,7 @@ class NDETransform(nn.Module):
             xtrJ[:, 1:],
             xtrJ[:, 0:1],
         )
+
         if keepdim:
             return y, -log_abs_det_dx_dy
         else:
@@ -102,17 +89,19 @@ class NDETransform(nn.Module):
         # invert t_span for backward integration
         self.model[1].t_span = self.t_span_reverse
 
-        # returns sol = [start, end]
-        sol = self.model(y)[1]
-        x, log_abs_det_dy_dx = (
-            sol[:, 1:],
-            sol[:, 0:1],
-        )
-
-        if keepdim:
-            return x, -log_abs_det_dy_dx
-        else:
-            return x, -log_abs_det_dy_dx[:, 0]
+        # TODO: Fix this wrong backward for backward time
+        wrong_grad = self.model[1].vf.sensitivity == "adjoint"
+        with torch.set_grad_enabled(not wrong_grad):
+            # returns sol = [start, end]
+            sol = self.model(y)[1]
+            x, log_abs_det_dy_dx = (
+                sol[:, 1:],
+                sol[:, 0:1],
+            )
+            if keepdim:
+                return x, -log_abs_det_dy_dx
+            else:
+                return x, -log_abs_det_dy_dx[:, 0]
 
     def __str__(self):
         return "NDETransform"

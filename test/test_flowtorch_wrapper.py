@@ -19,9 +19,9 @@ class TestFlowTorchWrapper(unittest.TestCase):
         )
 
         # transform = transforms.CompositeTransform(transforms_list)
-        bijector = sf.WrapInverseModel(
+        bijector = sf.nf.WrapInverseModel(
             params_fn=sf.normalizing_flows.LazyModule(
-                get_transform=sf.utils.get_transform_nflow,
+                get_transform=sf.transforms.get_transform_nflow,
                 Transform=nflows.flows.MaskedAutoregressiveFlow,
                 num_layers=num_layers,
                 hidden_features=hidden_features,
@@ -45,8 +45,8 @@ class TestFlowTorchWrapper(unittest.TestCase):
         )
 
         # transform = transforms.CompositeTransform(transforms_list)
-        composted_bij = sf.utils.get_bijector(
-            get_transform=sf.normalizing_flows.get_residual_transform,
+        composted_bij = sf.nf.get_bijector(
+            get_transform=sf.transforms.get_residual_transform,
             compose=True,
             hidden_features=hidden_features,
             hidden_layers=hidden_layers,
@@ -66,8 +66,8 @@ class TestFlowTorchWrapper(unittest.TestCase):
             torch.zeros(dims), torch.eye(dims)
         )
 
-        flow = sf.utils.get_flow(
-            get_transform=sf.normalizing_flows.get_residual_transform,
+        flow = sf.nf.get_flow(
+            get_transform=sf.transforms.get_residual_transform,
             base_dist=base_dist,
             compose=True,
             hidden_features=hidden_features,

@@ -9,11 +9,11 @@ from torch.utils.data import TensorDataset
 import torch.distributions as dist
 import torch.distributions.constraints as constraints
 import torch.distributions.transformed_distribution
+import extratorch as etorch
 import flowtorch as ft
 import flowtorch.bijectors as bij
 import flowtorch.distributions as ftdist
 from flowtorch.parameters.base import Parameters
-import deepthermal.validation
 
 l2_loss = nn.MSELoss()
 
@@ -29,54 +29,79 @@ def monte_carlo_dkl_loss(
     d_kl_est = -model.log_prob(x_train).mean()
     return d_kl_est
 
-def get_monte_carlo_dkl_loss_conditioned(epsilon:float=0.1):
-    def monte_carlo_dkl_loss_conditioned(
+
+def get_monte_carlo_elbo_loss(epsilon: float = 1, no_grad_posterior: bool = True):
+    def monte_carlo_elbo_loss(
         model: nn.ModuleList,
         data: Union[List, TensorDataset],
         loss_func: callable = None,
+        no_update: bool = False,
     ) -> torch.Tensor:
-        # model == flow
-        # load samples from unknown
-        x_train, p_old, priors = data[:]
-        c_max = p_old.shape[-1]  # model.bijector.module.context_size
-        # epsilon = 0.001
-        # # print(model.bijector._context_shape)
-        #
-        log_p = torch.zeros((len(p_old), c_max))
+
+        # assumes data on this form
+        # use notation for each row since priors are used for each row
+        # x, p(c_k|x), p(c_k)
+        x_train, posterior, prior = data[:]
+
         c_max = len(model)
+        log_x_cond_c = torch.zeros((len(posterior), c_max))
+
         for k in range(c_max):
-            log_p[:, k] = model[k].log_prob(x_train)
+            log_x_cond_c[..., k] = model[k].log_prob(x_train)
 
-        p = torch.exp(log_p)
-        p = torch.nan_to_num(p)
+        with torch.set_grad_enabled(not no_grad_posterior):
+            # calculate new posterior
+            # p(x|c) = exp(log(p(x|c))
+            x_cond_c = torch.nan_to_num(torch.exp(log_x_cond_c))
 
-        sum_p = torch.sum(p*priors, dim=1, keepdim=True)
-        p_new  = p*priors/sum_p
-        d_kl_est = - (p_new* log_p).mean()
+            # p(x) = sum p(x|c_i) * p(x) , (i is last dim)
+            marginal_x = torch.sum(x_cond_c * prior, dim=-1, keepdim=True)
+
+            # p(x|c) = p(x|c) * p(c) / p(x)
+            new_posterior_ = x_cond_c * prior / marginal_x
+
+            new_posterior = posterior * (1 - epsilon) + new_posterior_ * epsilon
+
+            # this will now be done also when estimating loss
+            if not no_update:
+                posterior[:] = new_posterior
+
+        # after update
+        monte_carlo_elbo = -(new_posterior * log_x_cond_c).mean()
+
+        return monte_carlo_elbo
+
+    return monte_carlo_elbo_loss
 
 
-        return d_kl_est
-    return monte_carlo_dkl_loss_conditioned
-
-def get_post_epoch_update_p(epsilon:float=0.1):
+# not efficient implementation
+def get_update_posterior(epsilon: float = 0.1):
     @torch.no_grad()
-    def post_epoch_update_p(model:nn.Module, data:torch.utils.data.Dataset):
-        x_train, p_old = data[:]
-        c_max = p_old.shape[-1]  # model.bijector.module.context_size
-        log_p = torch.zeros((len(p_old), c_max))
+    def update_posterior(model: nn.ModuleList, data: torch.utils.data.Dataset):
+        # assumes data on this form
+        # use notation for each row since priors are used for each row
+        # x, p(c_k|x), p(c_k)
+        x_train, posterior, prior = data[:]
 
+        c_max = len(model)
+        # log p(x|c)
+        log_x_cond_c = torch.zeros((len(posterior), c_max))
         for k in range(c_max):
-            log_p[:,k] = model[k].log_prob(x_train)
+            log_x_cond_c[..., k] = model[k].log_prob(x_train)
 
-        p = torch.exp(log_p)
-        p = torch.nan_to_num(p)
-        sum_p = torch.sum(p, dim=1, keepdim=True)
-        p_dir = p / sum_p
-        p_new = p_old + epsilon*(p_dir - p_old)
+        # p(x|c) = exp(log(p(x|c))
+        cond_x_c = torch.nan_to_num(torch.exp(log_x_cond_c))
 
-        p_old[:] = p_new[:]
+        # p(x) = sum p(x|c_k) * p(x) , (k is last dim)
+        marginal_x = torch.sum(cond_x_c * prior, dim=-1, keepdim=True)
 
-    return post_epoch_update_p
+        # p(x|c) = p(x|c) * p(c) / p(x)
+        new_posterior = cond_x_c * prior / marginal_x
+
+        posterior[:] = posterior + epsilon * (new_posterior - posterior)
+
+    return update_posterior
+
 
 def get_flow(
     get_transform: Callable[..., nn.Module],
@@ -85,7 +110,7 @@ def get_flow(
     flowtorch: bool = True,
     num_flows: int = 1,
     **transform_kwargs,
-) -> Union[nn.ModuleList,dist.TransformedDistribution, ftdist.Flow]:
+) -> Union[nn.ModuleList, dist.TransformedDistribution, ftdist.Flow]:
     """get the flow if you have a get get_transform"""
     if num_flows > 1:
         return nn.ModuleList(
@@ -119,6 +144,39 @@ def get_flow(
                 base_distribution=base_dist, transforms=transform
             )
             return model
+
+
+def get_bijector(
+    get_transform: callable = None,
+    inverse_model: bool = True,
+    compose: bool = False,
+    **transform_kwargs,
+) -> Union[ft.bijectors.Bijector, ft.Lazy]:
+    """
+    returns wrapped module which has a forward method which returns T(x), logDT(x)
+
+    if composted **transform_kwargs must only contain lists
+    """
+    wrapp = WrapInverseModel if inverse_model else WrapModel
+    if compose:
+        transform_kwargs_iter = etorch.create_subdictionary_iterator(
+            transform_kwargs, product=False
+        )
+        bijectors = []
+        for transform_kwargs_i in transform_kwargs_iter:
+            bijectors.append(
+                wrapp(
+                    params_fn=LazyModule(
+                        get_transform=get_transform, **transform_kwargs_i
+                    )
+                )
+            )
+        bijector = ft.bijectors.Compose(bijectors=bijectors)
+    else:
+        bijector = wrapp(
+            params_fn=LazyModule(get_transform=get_transform, **transform_kwargs)
+        )
+    return bijector
 
 
 class WrapModel(bij.Bijector):
@@ -262,36 +320,3 @@ class LazyModule(Parameters):
     ) -> Optional[Sequence[torch.Tensor]]:
         # so that params = context
         return (context,)
-
-
-def get_bijector(
-    get_transform: callable = None,
-    inverse_model: bool = True,
-    compose: bool = False,
-    **transform_kwargs,
-) -> Union[ft.bijectors.Bijector, ft.Lazy]:
-    """
-    returns wrapped module which has a forward method which returns T(x), logDT(x)
-
-    if composted **transform_kwargs must only contain lists
-    """
-    wrapp = WrapInverseModel if inverse_model else WrapModel
-    if compose:
-        transform_kwargs_iter = deepthermal.validation.create_subdictionary_iterator(
-            transform_kwargs, product=False
-        )
-        bijectors = []
-        for transform_kwargs_i in transform_kwargs_iter:
-            bijectors.append(
-                wrapp(
-                    params_fn=LazyModule(
-                        get_transform=get_transform, **transform_kwargs_i
-                    )
-                )
-            )
-        bijector = ft.bijectors.Compose(bijectors=bijectors)
-    else:
-        bijector = wrapp(
-            params_fn=LazyModule(get_transform=get_transform, **transform_kwargs)
-        )
-    return bijector

@@ -1,39 +1,43 @@
-from typing import List, Type, Union
+from typing import List
 
-import deepthermal.validation
+from signatureshape.so3.transformations import skew_to_vector, SRVT
+from signatureshape.so3 import animation_to_SO3
+from signatureshape.so3.helpers import crop_curve
+from signatureshape.so3.curves import move_origin_to_zero
+
 from tqdm import tqdm
 import numpy as np
 import torch
-import torch.distributions as dist
-import nflows.transforms
-import nflows.flows
-import flowtorch as ft
-import flowtorch.bijectors
-import flowtorch.distributions
-import shapeflow as sf
 
 
-# from shapeflow.utilsimport WrapInverseModel, WrapModel
+def animation_to_srvf(
+    animations: List,
+    skeleton,
+    reduce_shape=True,
+    max_frame_count=300,
+    remove_root=False,
+    **kwargs
+) -> np.array:
+    srv_curves = []
+    for animation in tqdm(animations):
+        curve_full = animation_to_SO3(skeleton, animation)
+        curve = crop_curve(curve_full, stop=max_frame_count)  # first 2 seconds
+        curve_zeroed = move_origin_to_zero(curve)
+        line = np.linspace(0, curve_zeroed.shape[1] / 120, curve_zeroed.shape[1])
+        if remove_root:
+            srv_curves.append(skew_to_vector(SRVT(curve_zeroed[3:], line)))
+        else:
+            srv_curves.append(skew_to_vector(SRVT(curve_zeroed, line)))
+
+    if not reduce_shape:
+        return np.array(srv_curves)
+    else:
+        return np.concatenate(srv_curves)
 
 
-# def get_composed_flow(
-#     get_transform: callable,
-#     base_dist: dist.Distribution,
-#     num_layers: int,
-#     inverse_model: bool = True,
-#     **transform_kwargs,
-# ) -> ft.distributions.Flow:
-#     wrapp = sf.WrapInverseModel if inverse_model else sf.WrapModel
-#     # create a bijector that wraps the original model. See test for example
-#     bijector = wrapp(
-#         params_fn=sf.LazyModule(get_transform=get_transform, **transform_kwargs)
-#     )
-#     model = ft.distributions.Flow(base_dist=base_dist, bijector=bijector)
-#     return model
-#
-
-
-def animation_to_eulers(animations: List, reduce_shape=True, **kwargs) -> np.array:
+def animation_to_eulers(
+    animations: List, reduce_shape=True, skeleton=None, max_frame_count=300, **kwargs
+) -> np.array:
     # assumes that all the skeletions in animations have the same keys
 
     # init array
@@ -55,7 +59,10 @@ def animation_to_eulers(animations: List, reduce_shape=True, **kwargs) -> np.arr
         return angle_array
     else:
         num_animations = len(animations)
-        min_frames = min([len(animation.get_frames()) for animation in animations])
+        min_frames = min(
+            [len(animation.get_frames()) for animation in animations]
+            + [max_frame_count]
+        )
         total_angles = len(frame_to_euler(animations[0].get_frames()[0], **kwargs))
 
         angle_array = np.zeros((num_animations, min_frames, total_angles))
@@ -83,7 +90,7 @@ def frame_to_euler(frame, deg2rad=True, remove_root=False) -> np.array:
 
 def data_to_motion_array(data: torch.Tensor, transposed: bool = True) -> np.ndarray:
     """Converts to degrees and pads zero position"""
-    pads = (0, 0, 3, 0)
+    pads = (0, 0, 3, 0) if data.shape[-1] == 47 else (0, 0, 6, 0)
     _data = data
     if len(_data.shape) == 4:
         _data = _data[0][0]
@@ -105,4 +112,7 @@ def motion_array_to_data(
     """Converts to degrees and pads zero position"""
     if transposed:
         motion_array = motion_array.T
-    return torch.tensor(np.deg2rad(motion_array[:, 3:])).float()
+
+    cut = 3 if motion_array.shape[-1] == 47 else 6
+
+    return torch.tensor(np.deg2rad(motion_array[:, cut:])).float()

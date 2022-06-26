@@ -45,7 +45,6 @@ def q(t):
 # run this to whow the curves
 if __name__ == "__main__":
     # Data frame with dat
-    import os
 
     plot_curve(c_1)
     plot_curve(c_2)
