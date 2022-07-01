@@ -4,35 +4,9 @@ import torch
 import torch.distributions.constraints as constraints
 import flowtorch.distributions as ftdist
 import shapeflow as sf
-import nflows.flows
 
 
 class TestFlowTorchWrapper(unittest.TestCase):
-    def test_nflow(self):
-        # Set up model
-        num_layers = 5
-        dims = 2
-        hidden_features = 4
-
-        base_dist = torch.distributions.MultivariateNormal(
-            torch.zeros(dims), torch.eye(dims)
-        )
-
-        # transform = transforms.CompositeTransform(transforms_list)
-        bijector = sf.nf.WrapInverseModel(
-            params_fn=sf.normalizing_flows.LazyModule(
-                get_transform=sf.transforms.get_transform_nflow,
-                Transform=nflows.flows.MaskedAutoregressiveFlow,
-                num_layers=num_layers,
-                hidden_features=hidden_features,
-                num_blocks_per_layer=2,
-            )
-        )
-
-        flow = ftdist.Flow(bijector=bijector, base_dist=base_dist)
-        samples = flow.sample([10])
-        print(samples.shape)
-
     def test_normflow(self):
         # Set up model
         num_layers = 2

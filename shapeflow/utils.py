@@ -83,7 +83,7 @@ def frame_to_euler(frame, deg2rad=True, remove_root=False) -> np.array:
         root_and_angles = np.deg2rad(root_and_angles)
 
     if remove_root:
-        root_and_angles = root_and_angles[3:]
+        root_and_angles = root_and_angles[6:]
 
     return root_and_angles
 

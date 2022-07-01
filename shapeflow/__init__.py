@@ -6,4 +6,4 @@ import shapeflow.plotting
 from shapeflow.lipschitz import get_post_step_lipchitz
 import shapeflow.transforms as transforms
 
-__all__ = ["utils", "reparam", "models", "plotting"]
+__all__ = ["utils", "reparam", "models", "plotting", "normalizing_flows"]

@@ -1,4 +1,3 @@
-from typing import Type
 import contextlib
 import io
 import torch
@@ -8,8 +7,6 @@ from torchdyn.models import CNF, hutch_trace, autograd_trace
 from torchdyn.core import NeuralODE
 from torchdyn.nn import Augmenter
 from collections.abc import Callable
-import nflows.transforms
-import nflows.flows
 from torch.distributions import MultivariateNormal
 
 
@@ -25,6 +22,11 @@ class NDETransform(nn.Module):
         t_span=None,
         sensitivity="adjoint",
         verbose: bool = False,
+        solver="dopri5",
+        atol=1e-3,
+        rtol=1e-3,
+        atol_adjoint=1e-6,
+        rtol_adjoint=1e-6,
         **model_kwargs,
     ):
         super().__init__()
@@ -52,10 +54,12 @@ class NDETransform(nn.Module):
         with contextlib.redirect_stdout(io.StringIO()) as f:
             self.nde = NeuralODE(
                 cnf,
-                solver="dopri5",
                 sensitivity=sensitivity,
-                atol=1e-4,
-                rtol=1e-4,
+                solver=solver,
+                atol=atol,
+                rtol=rtol,
+                atol_adjoint=atol_adjoint,
+                rtol_adjoint=rtol_adjoint,
                 return_t_eval=False,
             )
         if verbose:
@@ -145,17 +149,3 @@ def get_residual_transform(
         reverse=reverse,
     )
     return transform
-
-
-def get_transform_nflow(
-    Transform: Type, shape: torch.Size, **kwargs
-) -> nflows.transforms.Transform:
-    assert len(shape) == 1
-    transform = Transform(features=shape[0], **kwargs)
-    if isinstance(transform, nflows.flows.Flow):
-        transform = transform._transform
-
-    if isinstance(transform, nflows.transforms.Transform):
-        return transform
-    else:
-        RuntimeError("Failed to create Transform")
