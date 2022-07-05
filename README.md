@@ -20,12 +20,16 @@ To run notebooks with motion capture data the human motion database needs to be 
 
 
 The videos of motion and frame interpolation are located in the `videos` directory.
+### Here is a graphical introduction
+#### Test datasets: 
 
-Latent space interpolation of human frames (20 interpolation points):
-https://raw.githubusercontent.com/alexarntzen/shapeflow/main/videos/feature_interpolation_frame.mp4
 
-Latent space interpolation of human motion (20 interpolation of ca 1 second of human motion): 
-https://raw.githubusercontent.com/alexarntzen/shapeflow/main/videos/feature_interpolation_motion.mp4
+#### Videos of interpolations:
+
+[Latent space interpolation of human frames (20 interpolation frames)](https://raw.githubusercontent.com/alexarntzen/shapeflow/main/videos/feature_interpolation_frame.mp4)
+
+[Latent space interpolation of human motion (20 interpolating motions of 1 second)]( https://raw.githubusercontent.com/alexarntzen/shapeflow/main/videos/feature_interpolation_motion.mp4)
+
 
 
 
