@@ -1,3 +1,8 @@
+"""Models not already defined in other packages.
+
+Implements:
+    Convolutional network that reshapes input and output
+"""
 from typing import Union
 import torch
 import torch.nn as nn
@@ -5,6 +10,11 @@ from extratorch.models import FFNN
 
 
 class CNN2D(FFNN):
+    """Simple convolutional network
+
+    Also reshapes input from vectors to tensors, then back to vectors.
+    """
+
     def __init__(
         self, kernel_size: Union[int, tuple] = (5, 5), internal_shape=None, **kwargs
     ):
@@ -36,7 +46,6 @@ class CNN2D(FFNN):
         for layer in self.hidden_layers:
             x_internal = self.activation_func(layer(x_internal))
 
-        # TODO: output layer and input layer
         x_final = self.reshape_matrix_vector(x_matrix=x_internal, orig_shape=orig_shape)
         return x_final
 

@@ -1,23 +1,34 @@
-"""plot predicted data with decision border"""
+"""Module with plotting function for clustering"""
 from os.path import join
 from typing import List, Union
 import itertools
 import matplotlib.pyplot as plt
 import torch
-from flowtorch.distributions import Flow
+import torch.distributions as dist
 
 
 @torch.no_grad()
 def plot_2d_cluster(
-    model: List[Flow],
-    num_samples=100,
+    model: List[dist.Distribution],
+    num_samples: int = 100,
     grid_shape: Union[int, tuple] = 100,
     x_lim: tuple = (-1, 1),
     y_lim: tuple = (-1, 1),
-    plot_name="vis_model",
-    path_figures="../figures",
+    plot_name: str = "vis_model",
+    path_figures: str = "../figures",
     **kwargs,
-):
+) -> None:
+    """
+    Plot predicted data with decision border
+    Args:
+        model: List of methods with the log_prob method implemented
+        num_samples: number of samples from the model
+        grid_shape: number points in each direction of grid
+        x_lim: Parameter for axis
+        y_lim: Parameter for axis
+        plot_name: Name of figure
+        path_figures: Path of the directory to place figure
+    """
     assert len(model) <= 9, "can only plot max 10 clusters"
 
     if isinstance(grid_shape, int):

@@ -1,9 +1,14 @@
+"Module to handle motion capture data"
+import warnings
 from typing import List
 
-from signatureshape.so3.transformations import skew_to_vector, SRVT
-from signatureshape.so3 import animation_to_SO3
-from signatureshape.so3.helpers import crop_curve
-from signatureshape.so3.curves import move_origin_to_zero
+try:
+    from signatureshape.so3.transformations import skew_to_vector, SRVT
+    from signatureshape.so3 import animation_to_SO3
+    from signatureshape.so3.helpers import crop_curve
+    from signatureshape.so3.curves import move_origin_to_zero
+except ImportError:
+    warnings.warn("To use motion capture data we need the signatureshape package.")
 
 from tqdm import tqdm
 import numpy as np
@@ -18,6 +23,7 @@ def animation_to_srvf(
     remove_root=False,
     **kwargs
 ) -> np.array:
+    """Convert a list of animations to an array of geodesic interpolated SRV curves"""
     srv_curves = []
     for animation in tqdm(animations):
         curve_full = animation_to_SO3(skeleton, animation)
@@ -38,6 +44,7 @@ def animation_to_srvf(
 def animation_to_eulers(
     animations: List, reduce_shape=True, skeleton=None, max_frame_count=300, **kwargs
 ) -> np.array:
+    """Convert a list of animations to an array of euler angle data"""
     # assumes that all the skeletions in animations have the same keys
 
     # init array
@@ -89,7 +96,7 @@ def frame_to_euler(frame, deg2rad=True, remove_root=False) -> np.array:
 
 
 def data_to_motion_array(data: torch.Tensor, transposed: bool = True) -> np.ndarray:
-    """Converts to degrees and pads zero position"""
+    """Converts to degrees and pads zero (root) position"""
     pads = (0, 0, 3, 0) if data.shape[-1] == 47 else (0, 0, 6, 0)
     _data = data
     if len(_data.shape) == 4:

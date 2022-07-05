@@ -1,17 +1,13 @@
 numpy>=1.18.2
 matplotlib>=3.5.1
 torch>=1.10.2
-deepthermal @ git+https://github.com/alexarntzen/deepthermal.git
 seaborn>=0.11.2
+pandas~=1.4.3
 scikit-learn>=1.0.2
-flowtorch>=0.6
+flowtorch>=0.8
+torchdyn~=1.0.1
+tqdm~=4.64.0
+extratorch @ git+https://github.com/alexarntzen/extratorch.git
 residual-flows @ git+https://github.com/VincentStimper/residual-flows.git
 normflow @ git+https://github.com/VincentStimper/normalizing-flows.git
-signatureshape @ git+https://github.com/alexarntzen/paalel-master.git
-
-
-tqdm~=4.64.0
-normflow~=1.1
-setuptools~=59.5.0
-scipy~=1.8.0
-torchdyn~=1.0.1
+signatureshape @ git+https://github.com/alexarntzen/signatureshape.git
